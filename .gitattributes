@@ -1,0 +1,6 @@
+# Exclude large presentation files from GitHub language statistics
+presentation/** linguist-vendored
+*.html linguist-vendored
+
+# Ensure Python is the primary language
+*.py linguist-language=Python
