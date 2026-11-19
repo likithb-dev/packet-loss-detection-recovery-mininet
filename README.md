@@ -1,206 +1,179 @@
 # Packet Loss Detection & Recovery
 
-A Computer Networks mini project that implements application-layer packet loss detection and recovery over UDP, combined with link-failure detection and automatic OpenFlow rerouting in Mininet.
+A Computer Networks mini project built for **Review 2**, implementing application-layer packet loss detection and recovery over UDP in Python, paired with automated OpenFlow failover rerouting in Mininet and an interactive 3D presentation.
 
-> **Core Idea:** Retransmission fixes small random packet losses; SDN rerouting fixes major link failures.
+---
 
-## Overview
+## 📌 Project Overview
 
-Plain UDP provides no delivery guarantees—lost packets are silently dropped. This project adds reliability on top of UDP and pairs it with a fault-tolerant virtual network:
+Standard User Datagram Protocol (UDP) is fast, but it is unreliable—lost packets are silently dropped without notification. This project implements a reliable UDP transport layer and combines it with software-defined networking (SDN) fault tolerance:
 
-1. **Detection:** Every UDP packet is tagged with a sequence number so the receiver can spot gaps (e.g., receiving `14` then `17` flags `15` and `16` as missing).
-2. **Recovery:** The receiver sends an `ACK` for each received packet. If no `ACK` arrives within the timeout window (default `0.2s`), the sender retransmits the missing packet.
-3. **Failover Rerouting:** A Mininet topology with Open vSwitch (`s1`–`s4`) routes traffic along a primary path (`s1 → s2 → s4`) with simulated loss (`TCLink`). A Python path monitor probes the primary path with ICMP (`ping`) and updates OpenFlow rules on `s1` and `s4` to shift traffic to the backup path (`s1 → s3 → s4`) if the link breaks or loss exceeds `50%`.
+1. **Application-Layer Reliability:** Tags every UDP packet with sequence numbers (`udp_sender.py`, `udp_receiver.py`) to detect gaps and trigger selective retransmission via acknowledgments (ACKs).
+2. **Automated SDN Failover:** Implements a Mininet topology (`mininet_reroute.py`) with primary and backup paths. A background path monitor detects link failure via ICMP probing and dynamically updates OpenFlow rules (`ovs-ofctl`) to reroute traffic.
 
-## Network Architecture
+---
 
-```text
-                        [ Switch s2 ]  (Main path, 10% simulated loss)
-                       /             \
-[ Server A (h1) ] --- [ Switch s1 ]   [ Switch s4 ] --- [ Server B (h2) ]
-  10.1.1.10/24         \             /                    10.2.2.20/24
-                        [ Switch s3 ]  (Backup path)
+## ⚙️ Core Python Components (`src/`)
 
+All core execution logic is contained in the `src/` directory:
+
+| Python Script | Purpose & Functionality |
+| :--- | :--- |
+| **`udp_sender.py`** | Sliding-window sender (`--window 8`, `--timeout 0.2`). Assigns sequence numbers, tracks transmission timestamps, handles incoming ACKs, and retransmits unacknowledged packets. Supports `--no-recovery` for plain UDP comparison. |
+| **`udp_receiver.py`** | Receives numbered datagrams, tracks the highest sequence number seen, detects sequence gaps (`LOSS DETECTED`), logs recoveries, and sends back `ACK|seq` datagrams. |
+| **`mininet_reroute.py`** | Builds the 4-switch Mininet topology (`s1`–`s4`). Runs a continuous `PathMonitor` thread checking link operstate and ping loss, executing `ovs-ofctl add-flow` to reroute traffic instantly. |
+| **`live_demo.py`** | Orchestrates the full live demonstration (600 packets over lossy primary path + simulated cable/switch failure + dynamic rerouting). |
+| **`run_tests.py`** | Executes Test Cases 1 and 5 locally on any laptop with simulated packet loss across 3 trial runs, saving quantitative metrics to `src/results/local_results.csv`. |
+| **`run_mininet_tests.py`** | Automates Test Cases 1 through 4 inside the Mininet virtual network environment with real link impairment. |
+| **`charts.py`** | Parses CSV result logs using `matplotlib` to render comparative performance graphs. |
+
+---
+
+## 🏗️ Network Architecture & Topology
+
+```mermaid
+graph TD
+    subgraph Network A (10.1.1.0/24)
+        H1[Server A / h1]
+    end
+
+    subgraph Mininet SDN OpenFlow Domain
+        H1 -->|Port 1| S1[Switch s1<br>Path Decision]
+        
+        S1 -->|Port 2 (Main, 5ms, 10% Loss)| S2[Switch s2<br>Main Route]
+        S2 -->|Port 2| S4[Switch s4<br>Path Convergence]
+        
+        S1 -->|Port 3 (Backup, 10ms)| S3[Switch s3<br>Backup Route]
+        S3 -->|Port 3| S4
+    end
+
+    subgraph Network B (10.2.2.0/24)
+        S4 -->|Port 1| H2[Server B / h2]
+    end
+
+    style S1 fill:#1E6FD9,stroke:#fff,stroke-width:2px,color:#fff
+    style S2 fill:#D64545,stroke:#fff,stroke-width:2px,color:#fff
+    style S3 fill:#27AE60,stroke:#fff,stroke-width:2px,color:#fff
+    style S4 fill:#1E6FD9,stroke:#fff,stroke-width:2px,color:#fff
 ```
 
-* **Network A (`10.1.1.0/24`):** `h1` (Sender) at `10.1.1.10`
-* **Network B (`10.2.2.0/24`):** `h2` (Receiver) at `10.2.2.20`
-* **Switches (`s1`–`s4`):** Open vSwitch controlled via OpenFlow rules
+* **Network A (`10.1.1.0/24`)**: Sender host `h1` (`10.1.1.10`)
+* **Network B (`10.2.2.0/24`)**: Receiver host `h2` (`10.2.2.20`)
+* **Switches (`s1` – `s4`)**: Open vSwitch instances managed via OpenFlow rules (`failMode=secure`)
 
-## Tech Stack
+---
 
-* **Language:** Python 3
-* **Network Emulation:** Mininet, `TCLink`, Open vSwitch (`ovs-ofctl`)
-* **Protocols:** UDP (custom sequence numbers & ACKs), OpenFlow, ICMP (`ping`), TCP (baseline comparison)
-* **OS:** Ubuntu Linux
-* **Presentation:** Interactive HTML/Three.js 3D deck (`presentation/Packet_Loss_Presentation.html`)
-
-## Prerequisites
-
-* Ubuntu Linux (required for Mininet)
-* Python 3.8+
-* Mininet and Open vSwitch installed:
-```bash
-sudo apt-get update
-sudo apt-get install -y mininet openvswitch-switch
-```
-
-## Project Structure
+## 📂 Repository Structure
 
 ```text
 packet-loss-detection-recovery-mininet/
-├── README.md
 ├── .gitignore
 ├── LICENSE
-├── src/                          # Python scripts & Mininet topology/monitor
-│   ├── udp_sender.py            # Sender with sequence numbers, ACK handling, retransmission
-│   ├── udp_receiver.py          # Receiver with gap detection, ACK generation
-│   ├── tcp_sender.py            # TCP sender for baseline comparison
-│   ├── tcp_receiver.py          # TCP receiver for baseline comparison
-│   ├── mininet_reroute.py       # Mininet topology, OpenFlow rules, path monitor
-│   ├── live_demo.py             # Full live demo (600 packets, failure + rerouting)
-│   ├── run_tests.py             # Laptop tests (Test 1 & 5) - simulated loss
-│   ├── run_mininet_tests.py     # Mininet tests (Tests 1-4) - real loss
-│   ├── charts.py                # Generate result charts from CSV
-│   └── results/                 # Test logs, CSV outputs, and charts
-├── presentation/                # Interactive 3D presentation
-│   ├── index.html               # Main presentation (open via HTTP server)
-│   ├── deck.css                 # Slide styling
-│   ├── netsim.css               # Network simulation styling
-│   ├── engine3d.js              # Three.js rendering engine
-│   ├── models.js                # 3D models for simulation
-│   ├── netsim.js                # Network simulation logic
-│   ├── notes.html               # Speaker notes viewer
-│   ├── assets/                  # Background images
-│   └── vendor/                  # Three.js & OrbitControls
-├── docs/                        # Speaker scripts & presentation notes
-│   ├── Speaker_Script_Review2.txt
-│   └── What_To_Say.txt
-└── Packet_Loss_Simulation.html  # Standalone network simulation
+├── README.md
+├── src/                          # Core Python scripts & test runner
+│   ├── udp_sender.py             # Reliable UDP sender (sliding window)
+│   ├── udp_receiver.py           # Reliable UDP receiver & ACK generator
+│   ├── tcp_sender.py             # TCP baseline sender
+│   ├── tcp_receiver.py           # TCP baseline receiver
+│   ├── mininet_reroute.py        # Mininet topology & OpenFlow monitor
+│   ├── live_demo.py              # Full end-to-end demonstration script
+│   ├── run_tests.py              # Automated laptop test harness (Tests 1 & 5)
+│   ├── run_mininet_tests.py      # Mininet test suite (Tests 1 - 4)
+│   ├── charts.py                 # Matplotlib chart generator
+│   └── results/                  # CSV logs and generated PNG plots
+├── presentation/                 # Interactive 3D presentation deck
+│   ├── index.html                # Main slide deck (HTML5 / Three.js)
+│   ├── Packet_Loss_Presentation.html
+│   ├── deck.css / netsim.css     # Styling sheets
+│   ├── engine3d.js / models.js   # 3D rendering & network simulation engine
+│   ├── netsim.js / notes.html    # Simulation controls & speaker notes view
+│   ├── assets/                   # Graphical assets & backgrounds
+│   └── vendor/                   # Three.js & OrbitControls libraries
+└── docs/                         # Project documentation & speaker notes
+    ├── Packet_Loss_Recovery_Presentation.pptx
+    ├── Speaker_Script_Review2.txt
+    └── What_To_Say.txt
 ```
 
-## Getting Started
+---
 
-### 1. Clone the Repository
+## 🚀 Getting Started & Usage
+
+### 1. Clone & Setup
 ```bash
-git clone https://github.com/<your-username>/packet-loss-detection-recovery-mininet.git
+git clone https://github.com/likithb-dev/packet-loss-detection-recovery-mininet.git
 cd packet-loss-detection-recovery-mininet
 ```
 
-### 2. Live Demo (Any Laptop - Two Terminals)
+### 2. Run Local Python Simulation (Any Laptop)
+Open two separate terminal windows inside the `src/` directory:
 
-**Terminal 1 (Receiver):**
+**Terminal 1 (Start Receiver):**
 ```bash
 cd src
 python3 udp_receiver.py --loss 0.1
 ```
 
-**Terminal 2 (Sender):**
+**Terminal 2 (Start Sender):**
 ```bash
 cd src
 python3 udp_sender.py --count 100 --loss 0.1
 ```
 
-### 3. Laptop Tests (Test 1 & Test 5 - Simulated Loss)
+### 3. Run Automated Laptop Test Suite
 ```bash
 cd src
 pip3 install matplotlib
 python3 run_tests.py
 ```
-Results and charts are saved in `src/results/`.
+*(Generates performance metrics and saves CSV logs/charts to `src/results/`)*
 
-### 4. Mininet Tests (Tests 1-4 - Real Loss, Linux Only)
+### 4. Run Mininet Network Tests (Ubuntu / Linux VM)
 ```bash
 cd src
+sudo apt-get update && sudo apt-get install -y mininet openvswitch-switch python3-matplotlib
 sudo python3 run_mininet_tests.py
 ```
-If a run crashes, clean up with `sudo mn -c` and run again.
-
-For live demo with rerouting:
+*(To run the live interactive rerouting demo)*:
 ```bash
 sudo python3 mininet_reroute.py --loss 10
 ```
-Or the full working model:
-```bash
-sudo python3 live_demo.py
-```
 
 ### 5. View the Interactive Presentation
+To launch the 3D presentation deck with embedded speaker notes:
 ```bash
 cd presentation
 python3 -m http.server 8765
 ```
-Then open `http://localhost:8765` in Chrome.
-- Arrow keys: Next/Previous slide
-- `F`: Full screen
-- `N`: Speaker notes
-- `P`: Notes window
-
-## Test Cases
-
-| # | Test | Description | Where it Runs |
-|---|------|-------------|---------------|
-| 1 | Different loss amounts | 0%, 5%, 10%, 20% loss (plain UDP vs our method) | Laptop & Mininet |
-| 2 | Broken link | Cut s1–s2, measure detection & recovery time | Mininet |
-| 3 | Before vs after rerouting | Main path vs backup path comparison | Mininet |
-| 4 | Our method vs TCP | Same transfer using TCP baseline | Mininet |
-| 5 | Different timeouts | 0.1s, 0.2s, 0.5s timeout at 10% loss | Laptop |
-
-Each test runs 3 times and results are averaged.
-
-## Results Summary
-
-In initial 200-packet trials with `10%` induced loss on the `s1–s2` link:
-
-* **Plain UDP:** ~176/200 packets delivered (~24 lost)
-* **Our Reliable UDP:** **200/200** packets delivered (`~20` missing packets detected and recovered via retransmission, `0` lost, ~4–5s transfer time)
-
-### Key Findings
-
-| Loss Rate | Plain UDP Delivery | Our Method Delivery | Retransmissions | Time (s) |
-|-----------|-------------------|---------------------|-----------------|----------|
-| 0%        | 100%              | 100%                | 0               | 0.5      |
-| 5%        | 95.8%             | 100%                | ~24             | ~3.0     |
-| 10%       | 87.7%             | 100%                | ~48             | ~4.7     |
-| 20%       | 76.7%             | 100%                | ~102            | ~8.1     |
-
-**Test 5 - Timeout Tuning (10% loss):**
-- 0.1s timeout: ~2.5s transfer, ~48 retransmissions
-- 0.2s timeout: ~5.3s transfer, ~50 retransmissions  
-- 0.5s timeout: ~12.8s transfer, ~54 retransmissions
-
-Shorter timeouts = faster recovery (as long as timeout > RTT).
-
-## How It Works
-
-### Detection (udp_receiver.py)
-- Receiver tracks the highest sequence number seen
-- When a packet arrives with a gap (e.g., highest was 1, now got 3), it detects missing packets (2)
-- Prints `LOSS DETECTED: expected 2, got 3, missing [2]`
-
-### Recovery (udp_sender.py)
-- Sender maintains a sliding window (default 8 packets)
-- Each packet sent is timed
-- If no ACK received within timeout (default 0.2s), packet is retransmitted
-- Selective Repeat: only unacknowledged packets are retransmitted
-
-### Rerouting (mininet_reroute.py)
-- PathMonitor thread checks every 0.1s:
-  1. Is the s1–s2 interface up?
-  2. Do 20 test pings have <50% loss?
-- On failure: runs `ovs-ofctl add-flow` to change s1 and s4 from output port 2 → port 3
-- Backup path: s1 → s3 → s4 (10ms delay each vs 5ms on main)
-
-## Team
-
-* **Lahaarika Rajuu** - Detection & Recovery Logic
-* **Likhit B** - Network Architecture & Rerouting
-* **Krithik V** - Testing, Results & Presentation
-
-## License
-
-This project is open-source under the [MIT License](LICENSE).
+Open your browser at **`http://localhost:8765`**.  
+* **Shortcuts:** Arrow keys (Navigate slides), `F` (Fullscreen), `N` (Speaker notes overlay), `P` (Separate notes window).
 
 ---
 
-*Built for Computer Networks Mini Project - Review 2 (2026)*
+## 📊 Test Cases & Results Summary
+
+| Test # | Evaluation Objective | Parameters | Environment |
+| :---: | :--- | :--- | :--- |
+| **1** | Packet Loss vs. Delivery | 0%, 5%, 10%, 20% loss rate | Laptop & Mininet |
+| **2** | Link Failure Detection & Recovery | Primary link down (`s1–s2`) | Mininet |
+| **3** | Rerouting Impact Analysis | Before vs. After backup path activation | Mininet |
+| **4** | Custom Reliable UDP vs. TCP | Baseline comparison | Mininet |
+| **5** | Retransmission Timeout Tuning | 0.1s, 0.2s, 0.5s timeout windows | Laptop |
+
+### Performance Metrics (Average of 3 Trials at 10% Loss)
+* **Plain UDP:** ~87.7% delivery rate (12.3% unrecoverable data loss).
+* **Our Reliable UDP:** **100% delivery rate** (0% loss, ~48 retransmissions, ~4.7s transfer duration).
+
+---
+
+## 👥 Team Members
+
+* **Likhit B.** — Network Architecture, OpenFlow Rerouting & Mininet Emulation
+* **Lahaarika Rajuu** — Application-Layer Sequence Detection & Recovery Logic
+* **Krithik V.** — Experimental Test Harness, Data Visualization & Presentation Deck
+
+---
+
+## 📜 License
+
+This project is open-source under the terms of the [MIT License](LICENSE).
