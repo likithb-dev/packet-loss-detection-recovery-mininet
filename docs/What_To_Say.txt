@@ -1,0 +1,18 @@
+PACKET LOSS PROJECT - Review 2
+
+1) THE PRESENTATION (with the simulation and speaker notes)
+   Do NOT double-click index.html, it will not work that way.
+   Open Terminal (Mac) or Command Prompt (Windows), go into the "presentation" folder, and run:
+       python3 -m http.server 8765        (on Windows: python -m http.server 8765)
+   Then open  http://localhost:8765  in Chrome.
+   Keys: arrows = next/previous slide, F = full screen, N = notes, P = notes window.
+   Your speaker notes are on every slide (Notes button).
+
+2) THE CODE (in the "code" folder)
+   Live demo on any laptop (two terminals, inside the code folder):
+       python3 udp_receiver.py --loss 0.1
+       python3 udp_sender.py --count 100 --loss 0.1
+   Run the test cases:
+       python3 run_tests.py
+   Mininet (Ubuntu VM only):
+       sudo python3 live_demo.py

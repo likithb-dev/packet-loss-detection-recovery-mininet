@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+
+# Mininet & network captures
+*.pcap
+*.pcapng
+*.log
+nohup.out
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Archives (keep source unzipped)
+*.zip
+
+# Test outputs (keep in results/ but ignore temp files)
+*.tmp

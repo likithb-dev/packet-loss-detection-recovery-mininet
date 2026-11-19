@@ -1,0 +1,106 @@
+ORDER: Lahaarika (the screen + loss & recovery) → Likhit (failure + backup path + transcript + timeline) → Krithik (experiments + real results + Q&A)
+Before starting: [CLICK sudo mn -c] so everything is fresh. Keys: Space = run/pause · B = break cable · U = repair · R = reset
+
+════════ 1 · LAHAARIKA: the screen, then loss and recovery (about 5 min) ════════
+## SAY: what is on the screen
+Sir, this is our working model. Everything we built is on this one screen.
+On the left is a terminal. The grey chips at the top are our real commands, already typed. Clicking one runs it, and the output appears here.
+Top right is our network. Bottom right is a timeline with one row per packet. At the very bottom left are live counters: sent, lost, found missing, resent, via backup, and delivered.
+The box at the top of the network always says, in plain words, what is happening right now. The box on the right says which path the traffic is using.
+
+## SAY: the network
+On the left is Server A, the sender. It is on Network A, address 10.1.1.10, the blue zone.
+On the right is Server B, the receiver, on a different network, Network B, address 10.2.2.20, the teal zone.
+In between are four switches, and each one has a job:
+s1 decides the path. The badge above it shows its current rule.
+s2 is the main route.
+s3, at the bottom, is the backup route. It shares no cable and no switch with the main route.
+s4 is where both paths join before Server B.
+The gold path, s1 to s2 to s4, is the main path. The red tag shows we add 10% loss on the s1 to s2 cable on purpose. The green path through s3 is the backup.
+
+## SAY: run it
+[CLICK the gold chip: live_demo.py]
+Server A sends 12 numbered packets, 0 to 11. Each gold cube is one packet with its number on it.
+[WHEN #2 TURNS RED] Packet 2 was lost on the cable between s1 and s2. Right now, nobody knows.
+[WHEN "LOSS DETECTED" APPEARS] Server B received packet 3, but it never got 2. The numbers have a gap, so it knows 2 is missing. That is detection.
+[WHEN "timeout for packet 2" APPEARS] For every packet it receives, Server B sends back a small reply called an ACK, meaning "got it". Server A never got an ACK for 2, so after 85 milliseconds it sends it again. That is recovery.
+[WHEN "RECOVERED: packet 2" APPEARS → CLICK ❚❚ TO PAUSE]
+The second copy arrived. Packet 2 is recovered. Look at the counters: 1 lost, 1 found missing, 1 resent.
+Likhit will now show what happens when the main path itself breaks.
+
+## WHAT'S ACTUALLY HAPPENING (for you)
+• Detection (udp_receiver.py): Server B remembers the highest number it has seen. Packet 3 arrives, the highest was 1, so it checks the numbers in between and finds 2 never came.
+• Recovery (udp_sender.py): Server A notes when it sent each packet. No ACK within the timeout (0.2 s in the real code, 85 ms here) → send it again.
+• Packets 4 and 5 leave late because Server A only allows 4 packets waiting for a reply at once (the "window"). 8 in the real code; 4 here so it is easy to see.
+• The animation is slowed down about 100× so people can follow it. Times shown are network time.
+
+════════ 2 · LIKHIT: the failure, the backup path, transcript and timeline (about 5 min) ════════
+## SAY
+[CLICK ❚❚ TO RESUME]
+[WHEN "BREAKING the main cable" APPEARS] Now the main cable between s1 and s2 breaks, while packet 6 is on it. That packet is lost, and so is packet 7 behind it.
+[WHEN THE "[monitor]" LINES APPEAR] Our path monitor keeps testing the main path. It noticed the path is dead and changed the rules in s1 and s4. Look at the badge above s1: it now says rule → s3, backup. The box on the right now says BACKUP.
+From now on every packet turns green and goes s1, s3, s4.
+[WHEN "RECOVERED … via backup" APPEARS] Server B noticed 6 and 7 were missing. Server A resent them, and this time they went through the backup path and were recovered. So the backup path carries both the new packets and the resent ones.
+[WHEN THE REPORTS APPEAR] The sender report and receiver report are the same format our real programs print: 12 out of 12 delivered, 3 lost packets found and recovered, 0 still missing.
+
+## SAY: the transcript
+[CLICK the Transcript tab]
+This is the transcript: one row for every event. Time is when it happened, packet is which one, path is MAIN or BACKUP, and the last column says what happened. Red rows are losses, gold rows are recoveries, green rows are the rerouting.
+[POINT, from the top] Packets 0 to 3 sent on main. Packet 2 lost. Packets 0 and 1 delivered. Server B gets 3, detects 2 missing. Timeout, 2 resent, 2 recovered.
+[SCROLL TO the red CABLE BROKEN row] Cable broken. 6 and 7 lost. Packet 8 was still sent on main, because the monitor had not reacted yet, then s1 rerouted it into the backup. Path monitor, rerouted, and from here the path column says BACKUP. 6 and 7 detected missing, resent via backup, recovered. Last row: done, 12 out of 12.
+[TICK "show ACK rows"] These grey rows are the replies, "got #2". [CLICK "download transcript (.csv)"] It can be saved as a spreadsheet.
+[CLICK Terminal]
+
+## SAY: the timeline
+The timeline at the bottom right has one row per packet. Gold bars are a packet travelling on the main path, green bars on the backup. A red cross is where a packet was lost. A white diamond is delivered, and a gold diamond with a ring is a recovered packet. The dashed lines mark the moment the cable broke and the moment we rerouted.
+So for packet 6 you can see: gold bar, red cross at the break, then a green bar after the reroute, and a gold ring: recovered through the backup.
+
+## SAY: proof from the switch
+[CLICK dump-flows s1] This is the actual rule inside switch s1. It says output s1-eth3. Packets from Server A now leave on port 3, which goes to s3, the backup.
+Krithik will now run some experiments on it.
+
+## WHAT'S ACTUALLY HAPPENING (for you)
+• A switch rule is one line: "packets in on port 1 → send out port 2". In s1: port 1 = Server A, port 2 = s2 (main), port 3 = s3 (backup). Rerouting = changing "out 2" to "out 3" with ovs-ofctl. s4 gets the same change so ACKs also come back via s3.
+• The monitor (mininet_reroute.py) checks every 0.1 s: is the s1–s2 cable up, and do test pings get through? Down, or more than 50% loss → reroute.
+• 6 and 7 were lost because they were on the cable in the few ms before the monitor reacted. Recovery fixes those, so the two methods work together.
+
+════════ 3 · KRITHIK: experiments, real results, close (about 5 min) ════════
+## SAY: back to the main path
+[CLICK link s1 s2 up] I am repairing the main cable. The monitor sees the main path is healthy and moves traffic back. The badge above s1 says s2 again.
+[CLICK dump-flows s1] And the rule is back to output s1-eth2, the main path.
+
+## SAY: without our method vs with it
+[CLICK 20% in the loss box at the top] Let me make the main cable worse: 20% loss.
+[CLICK udp_sender.py --no-recovery] This is plain UDP, with no replies and no resending.
+[WHEN THE REPORT APPEARS] Look: some packets are still missing at the end, the red rows in the transcript. They are lost for good, because plain UDP never notices.
+[CLICK udp_sender.py] Same 20% loss, now with our method.
+[WHEN THE REPORT APPEARS] 12 out of 12 delivered, 0 still missing. The cost is the extra resends you can see in the counter.
+
+## SAY: a switch failure
+[CLICK switch s2 stop] Now the main-route switch itself fails, not just a cable. The monitor reroutes again through s3. This is why the backup route has its own switch.
+[CLICK h1 ping h2] Network A still reaches Network B, in about 40 milliseconds through the backup. The main path takes about 20, so the backup is slower but working.
+
+## SAY: our real results
+[CLICK run_tests.py] These numbers are not from the animation. They come from our real test run on the laptop: 200 packets per run, 3 runs each, averaged.
+Test 1: plain UDP delivered 95.8% at 5% loss, 87.7% at 10%, and only 76.7% at 20%. Our method delivered 100% every time. The price is resends: about 24, 48 and 102.
+Test 5: every timeout delivered 100%. A 0.1-second timeout finished in 2.5 seconds, 0.2 in 5.3, and 0.5 in 12.8. A shorter wait recovers faster, as long as it is longer than the time a reply takes to come back.
+
+## SAY: close
+So to sum up: small losses are found from the packet numbers and fixed by resending, and big failures are fixed by moving traffic to the backup path. Together, every packet arrives.
+Thank you, sir. We are happy to take questions.
+
+## WHAT'S ACTUALLY HAPPENING (for you)
+• run_tests.py on the laptop started the real sender and receiver 33 times and saved results/local_results.csv. This chip prints those saved numbers.
+• About 48 resends at 10% loss even though only about 20 packets were lost: ACKs get lost too, and a resent packet can be lost again.
+• Ping is 20 ms on main (5 ms per cable, there and back) and 40 ms on backup (10 ms per cable).
+• If plain UDP happens to lose 0 packets (it is random), click it once more.
+
+════════ Q&A ════════
+Krithik takes each question first. Concepts (UDP, ACK, timeout) → Lahaarika. Network (switches, rerouting) → Likhit. Results → Krithik.
+Why 4 switches? s1 decides, s2 main route (lets us test a switch failure), s3 backup with nothing shared, s4 joins the paths.
+How does rerouting happen? The monitor runs ovs-ofctl add-flow to change s1 and s4 from output port 2 to port 3 (OpenFlow).
+Why two different networks? To act like two real separate sites; each server reaches the other network through its switch.
+Why UDP, not TCP? TCP already recovers by itself; we build recovery on UDP to show how it works.
+What if an ACK is lost? The sender times out and resends; the receiver gets a duplicate, ignores it and ACKs again.
+Is this real? The screen replays our code's logic and output so it can be watched slowly. The real programs run in our Ubuntu VM (sudo python3 live_demo.py) and on the laptop (run_tests.py).
+If nobody knows: "We will test that and include it in our report." Never guess.
